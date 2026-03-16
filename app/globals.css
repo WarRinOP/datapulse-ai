@@ -259,3 +259,21 @@ hr.dp-divider { border: none; border-top: 1px solid #1f2433; margin: 0; }
 }
 .nav-link:hover { color: #f8fafc; background: #0f1117; }
 .nav-link.active { color: #818cf8; }
+
+/* ─── Animations ─────────────────────────────── */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: fade-in 0.3s ease; }
+
+/* ─── Analysis page responsive grid ─────────── */
+@media (max-width: 768px) {
+  .analysis-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
