@@ -5,7 +5,7 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
 })
 
-const MODEL = 'claude-3-5-haiku-latest'
+const MODEL = 'claude-haiku-4-5'
 
 export interface AnalysisResult {
   narrative: string
