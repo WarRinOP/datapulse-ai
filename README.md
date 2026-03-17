@@ -1,94 +1,94 @@
 # DataPulse — AI Data Analysis Dashboard
 
-> Upload CSV or Excel → Claude AI analyzes → instant charts, narrative insights, and executive summary report.
+> Upload any CSV or Excel file. Get instant AI-powered analysis, charts, and actionable insights — powered by Claude.
 
-Built by **Abrar Tajwar Khan** as a Fiverr portfolio project demonstrating full-stack AI integration.
+## Live Demo
 
----
+[datapulse-ai.vercel.app](https://datapulse-ai.vercel.app) *(deploy link after Vercel setup)*
 
-## What It Does
+## Features
 
-1. **Upload** any CSV or Excel file (up to 10MB)
-2. **Claude AI** reads and analyzes the data — identifying trends, anomalies, and key metrics
-3. **Auto-Charts** render automatically based on what Claude recommends
-4. **Q&A Panel** — ask follow-up questions in plain English
-5. **Download** an executive summary report as `.txt`
-6. **History** — every analysis saved with full history dashboard
-
-## Demo Scenario
-
-Upload a sales CSV (date, region, product, units, revenue, returns) → Claude identifies performance drops and highlights → bar + line charts render → download report → ask "which region performed best in Q1?"
-
----
+- 📂 Upload CSV or Excel files up to 10MB with drag-and-drop
+- 🤖 Claude AI narrative analysis — plain-English insights about your data
+- 📊 Auto-generated charts (bar, line, pie, doughnut) tailored to your dataset
+- 📈 Key metrics extraction with trend arrows (↑↓→)
+- 💡 4 actionable recommendations per analysis
+- 💬 Ask follow-up questions about your data in natural language
+- 📄 Downloadable executive summary report (.txt)
+- 🗂️ Full analysis history dashboard with search and time filters
+- ✨ One-click demo with a realistic sales dataset
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
 | Framework | Next.js 16 (App Router) |
-| Language | TypeScript |
-| Styling | Tailwind CSS v4 |
+| AI Model | Claude Haiku 4.5 (Anthropic) |
 | Database | Supabase (PostgreSQL) |
-| AI | Claude API (claude-3-5-haiku-latest) |
 | Charts | Chart.js + react-chartjs-2 |
 | CSV Parsing | papaparse |
 | Excel Parsing | xlsx |
-| Deployment | Vercel |
+| Styling | Tailwind CSS v4 |
+| Fonts | Geist + JetBrains Mono |
+| Deploy | Vercel |
 
 ## Architecture
 
 ```mermaid
 graph LR
-    A[User uploads CSV/Excel] --> B[/api/analyze]
-    B --> C[parser.ts - parse + stats]
-    C --> D[claude.ts - AI analysis]
-    D --> E[Supabase dp_analyses]
-    E --> F[Dashboard renders]
-    F --> G[Q&A via /api/qa]
-    F --> H[Report via /api/report]
+  A[User uploads CSV/Excel] --> B[/api/analyze]
+  B --> C[lib/parser.ts\nparse + stats]
+  C --> D[Claude Haiku 4.5\nJSON analysis]
+  D --> E[dp_analyses\nSupabase table]
+  E --> F[/analysis/id\nanalysis page]
+  F --> G[/api/qa\nQ&A chat]
+  F --> H[/api/report\ndownload .txt]
+  I[/history page] --> J[/api/analyses\nlist + filter]
 ```
 
-## Database Tables
-
-All tables use `dp_` prefix (shared Supabase project):
-
-- **dp_analyses** — stores parsed data, Claude's analysis, chart configs
-- **dp_qa_messages** — Q&A chat history per analysis
-
-## Setup
+## Local Setup
 
 ```bash
-# Clone and install
-git clone https://github.com/abrartajwar/datapulse-ai.git
+# 1. Clone the repo
+git clone https://github.com/WarRinOP/datapulse-ai.git
 cd datapulse-ai
+
+# 2. Install dependencies
 npm install
 
-# Set environment variables
+# 3. Set up environment variables
 cp .env.local.example .env.local
-# Fill in NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, 
-# SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY
+# Fill in your Supabase + Anthropic API keys
 
-# Run dev server
+# 4. Run dev server
 npm run dev
+# Open http://localhost:3000
 ```
 
 ## Environment Variables
 
 | Variable | Description |
 |---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon (public) key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (server only) |
-| `ANTHROPIC_API_KEY` | Anthropic Claude API key |
+| `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon/public key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (server-side only) |
+| `ANTHROPIC_API_KEY` | Anthropic API key for Claude |
 
-## Build Phases
+## Database Schema
 
-- [x] **Phase 1** — Foundation (scaffold, libs, tables, base UI)
-- [ ] **Phase 2** — Analysis Engine (API routes)
-- [ ] **Phase 3** — Main UI (upload → analyze → charts)
-- [ ] **Phase 4** — History Dashboard
-- [ ] **Phase 5** — Polish + Deploy
+Two tables with `dp_` prefix (shared Supabase instance):
+
+```sql
+dp_analyses      -- stores analysis results from Claude
+dp_qa_messages   -- stores Q&A conversation history
+```
+
+## Deployment (Vercel)
+
+1. Connect `github.com/WarRinOP/datapulse-ai` to Vercel
+2. Add the 4 environment variables in Vercel dashboard
+3. Deploy — no build configuration needed
 
 ---
 
-*DataPulse is a portfolio project by Abrar Tajwar Khan.*
+Built by **Abrar Tajwar Khan** · Available for custom AI development on [Fiverr](https://fiverr.com)

@@ -275,5 +275,23 @@ hr.dp-divider { border: none; border-top: 1px solid #1f2433; margin: 0; }
   .analysis-grid {
     grid-template-columns: 1fr !important;
   }
+  .analysis-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+  }
+  .analysis-header > *:nth-child(2) {
+    text-align: left !important;
+  }
 }
+
+/* ─── History page mobile ────────────────────── */
+@media (max-width: 640px) {
+  .filter-bar-search { width: 100% !important; }
+  .filter-bar-pills  { flex-wrap: wrap !important; }
+  .pagination-btns button { flex: 1 !important; }
+}
+
+/* ─── No horizontal overflow ─────────────────── */
+html, body { overflow-x: hidden; max-width: 100vw; }
+
 
