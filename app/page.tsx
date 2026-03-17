@@ -115,6 +115,7 @@ export default function HomePage() {
   const [adminCode, setAdminCode] = useState('')
   const [adminError, setAdminError] = useState('')
   const [adminLoading, setAdminLoading] = useState(false)
+  const [simBlock, setSimBlock] = useState(false) // simulate IP-block mode
 
   // Initialize session
   useEffect(() => {
@@ -167,6 +168,7 @@ export default function HomePage() {
       formData.append('session_id', sessionId)
       const headers: Record<string, string> = {}
       if (admin) headers['x-admin-key'] = getAdminKey()
+      if (simBlock) headers['x-simulate-block'] = 'true'
       const res = await fetch('/api/analyze', { method: 'POST', body: formData, headers })
       const data = await res.json()
       if (!res.ok) {
@@ -202,6 +204,7 @@ export default function HomePage() {
     try {
       const hdrs: Record<string, string> = { 'Content-Type': 'application/json' }
       if (admin) hdrs['x-admin-key'] = getAdminKey()
+      if (simBlock) hdrs['x-simulate-block'] = 'true'
       const res = await fetch('/api/seed', {
         method: 'POST',
         headers: hdrs,
@@ -268,7 +271,7 @@ export default function HomePage() {
             fontFamily: '"JetBrains Mono", monospace',
             color: limitReached ? '#ef4444' : admin ? '#22c55e' : '#4b5675',
           }}>
-            {admin ? '∞ Unlimited' : limitReached ? '❌ Limit reached' : `${remaining}/${MAX_ANALYSES} remaining`}
+            {simBlock ? '⚠ Simulate ON' : admin ? '∞ Unlimited' : limitReached ? '❌ Limit reached' : `${remaining}/${MAX_ANALYSES} remaining`}
           </div>
         </div>
       </div>
@@ -389,12 +392,21 @@ export default function HomePage() {
         <div>Built by <span style={{ color: '#94a3b8', fontWeight: '500' }}>Abrar Tajwar Khan</span></div>
         <div style={{ marginTop: '8px' }}>
           {admin ? (
-            <button
-              onClick={() => { clearAdminKey(); setAdmin(false); setRemaining(getStoredRemaining()); showToast('Admin mode disabled', 'success') }}
-              style={{ background: 'none', border: 'none', color: '#22c55e', fontSize: '10px', cursor: 'pointer', padding: '2px 6px' }}
-            >
-              ✓ Admin active — click to disable
-            </button>
+            <>
+              <button
+                onClick={() => { clearAdminKey(); setAdmin(false); setSimBlock(false); setRemaining(getStoredRemaining()); showToast('Admin mode disabled', 'success') }}
+                style={{ background: 'none', border: 'none', color: '#22c55e', fontSize: '10px', cursor: 'pointer', padding: '2px 6px' }}
+              >
+                ✓ Admin active — click to disable
+              </button>
+              <span style={{ color: '#2d3548', fontSize: '10px', margin: '0 4px' }}>|</span>
+              <button
+                onClick={() => setSimBlock(s => !s)}
+                style={{ background: 'none', border: 'none', fontSize: '10px', cursor: 'pointer', padding: '2px 6px', color: simBlock ? '#fbbf24' : '#4b5675' }}
+              >
+                {simBlock ? '⚠ Block ON — click to unlock' : '🔒 Simulate IP Block'}
+              </button>
+            </>
           ) : (
             <button
               onClick={() => setShowAdminInput(true)}

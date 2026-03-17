@@ -38,6 +38,14 @@ export async function POST(req: NextRequest) {
     const adminKey = req.headers.get('x-admin-key') || ''
     const isAdmin = adminKey && adminKey === process.env.ADMIN_SECRET
 
+    // Simulate block mode — admin testing (fires BEFORE bypass so it actually blocks)
+    if (req.headers.get('x-simulate-block') === 'true' && adminKey === process.env.ADMIN_SECRET) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded for this network', code: 'RATE_LIMIT', remaining: 0 },
+        { status: 429 }
+      )
+    }
+
     // ── Rate limiting (skipped for admin) ─────────
     const supabaseRL = createServerSupabaseClient()
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()

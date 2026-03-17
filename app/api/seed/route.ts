@@ -24,6 +24,14 @@ export async function POST(req: NextRequest) {
     const adminKey = req.headers.get('x-admin-key') || ''
     const isAdmin = adminKey && adminKey === process.env.ADMIN_SECRET
 
+    // Simulate block mode — must check BEFORE admin bypass
+    if (req.headers.get('x-simulate-block') === 'true' && adminKey === process.env.ADMIN_SECRET) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded for this network', code: 'RATE_LIMIT', remaining: 0 },
+        { status: 429 }
+      )
+    }
+
     // ── Rate limit: session check (skipped for admin) ──
     if (!isAdmin && sessionId) {
       const { data: session } = await supabase
