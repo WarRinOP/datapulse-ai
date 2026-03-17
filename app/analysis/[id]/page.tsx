@@ -6,6 +6,7 @@ import { ChartGrid } from '@/components/analysis/ChartGrid'
 import { RecommendationsPanel } from '@/components/analysis/RecommendationsPanel'
 import { QAPanel } from '@/components/analysis/QAPanel'
 import { ReportButton } from '@/components/analysis/ReportButton'
+import { createServerSupabaseClient } from '@/lib/supabase'
 import type { DpAnalysis, DpQaMessage } from '@/lib/supabase'
 
 interface AnalysisPageProps {
@@ -14,11 +15,25 @@ interface AnalysisPageProps {
 
 async function getAnalysis(id: string): Promise<{ analysis: DpAnalysis; messages: DpQaMessage[] } | null> {
   try {
-    const port = process.env.PORT ?? '3000'
-    const base = `http://localhost:${port}`
-    const res = await fetch(`${base}/api/analyses/${id}`, { cache: 'no-store' })
-    if (!res.ok) return null
-    return res.json()
+    const supabase = createServerSupabaseClient()
+
+    // Fetch analysis directly from Supabase
+    const { data: analysis, error: analysisError } = await supabase
+      .from('dp_analyses')
+      .select('*')
+      .eq('id', id)
+      .single()
+
+    if (analysisError || !analysis) return null
+
+    // Fetch QA messages
+    const { data: messages } = await supabase
+      .from('dp_qa_messages')
+      .select('*')
+      .eq('analysis_id', id)
+      .order('created_at', { ascending: true })
+
+    return { analysis, messages: messages ?? [] }
   } catch {
     return null
   }
