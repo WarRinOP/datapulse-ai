@@ -35,10 +35,14 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Rate limiting ─────────────────────────────
-    if (sessionId) {
-      const supabaseRL = createServerSupabaseClient()
+    // ── Rate limiting ─────────────────────────────
+    const supabaseRL = createServerSupabaseClient()
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+      || req.headers.get('x-real-ip')
+      || 'unknown'
 
-      // Check session usage
+    // 1) Session-based check
+    if (sessionId) {
       const { data: session } = await supabaseRL
         .from('dp_sessions')
         .select('usage_count')
@@ -51,18 +55,19 @@ export async function POST(req: NextRequest) {
           { status: 429 }
         )
       }
+    }
 
-      // Secondary IP check
-      const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+    // 2) IP-based check — blocks switching browsers on the same network
+    if (ip !== 'unknown') {
       const { data: ipSessions } = await supabaseRL
         .from('dp_sessions')
         .select('usage_count')
         .eq('ip_address', ip)
 
       const totalIpUsage = (ipSessions || []).reduce((sum, s) => sum + (s.usage_count || 0), 0)
-      if (totalIpUsage >= MAX_ANALYSES * 3) {
+      if (totalIpUsage >= MAX_ANALYSES) {
         return NextResponse.json(
-          { error: 'Rate limit exceeded', code: 'RATE_LIMIT', remaining: 0 },
+          { error: 'Rate limit exceeded for this network', code: 'RATE_LIMIT', remaining: 0 },
           { status: 429 }
         )
       }
@@ -145,7 +150,6 @@ export async function POST(req: NextRequest) {
     // ── Update session usage ──────────────────────
     let remaining = MAX_ANALYSES - 1
     if (sessionId) {
-      const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
 
       const { data: existing } = await supabase
         .from('dp_sessions')
