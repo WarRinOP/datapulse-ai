@@ -4,7 +4,7 @@
 
 ## Live Demo
 
-[datapulse-ai.vercel.app](https://datapulse-ai.vercel.app) *(deploy link after Vercel setup)*
+[datapulse-ai-mocha.vercel.app](https://datapulse-ai-mocha.vercel.app)
 
 ## Features
 
@@ -36,14 +36,14 @@
 
 ```mermaid
 graph LR
-  A[User uploads CSV/Excel] --> B[/api/analyze]
-  B --> C[lib/parser.ts\nparse + stats]
-  C --> D[Claude Haiku 4.5\nJSON analysis]
-  D --> E[dp_analyses\nSupabase table]
-  E --> F[/analysis/id\nanalysis page]
-  F --> G[/api/qa\nQ&A chat]
-  F --> H[/api/report\ndownload .txt]
-  I[/history page] --> J[/api/analyses\nlist + filter]
+  A["User uploads CSV/Excel"] --> B["/api/analyze"]
+  B --> C["lib/parser.ts"]
+  C --> D["Claude Haiku 4.5"]
+  D --> E["dp_analyses (Supabase)"]
+  E --> F["/analysis/id page"]
+  F --> G["/api/qa chat"]
+  F --> H["/api/report download"]
+  I["/history page"] --> J["/api/analyses"]
 ```
 
 ## Local Setup
@@ -73,20 +73,23 @@ npm run dev
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon/public key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (server-side only) |
 | `ANTHROPIC_API_KEY` | Anthropic API key for Claude |
+| `DEMO_MODE` | Set to `true` to block analysis deletion |
+| `ADMIN_SECRET` | Secret code for admin bypass (unlimited analyses) |
 
 ## Database Schema
 
-Two tables with `dp_` prefix (shared Supabase instance):
+Three tables with `dp_` prefix (shared Supabase instance):
 
 ```sql
 dp_analyses      -- stores analysis results from Claude
 dp_qa_messages   -- stores Q&A conversation history
+dp_sessions      -- tracks session usage for rate limiting
 ```
 
 ## Deployment (Vercel)
 
 1. Connect `github.com/WarRinOP/datapulse-ai` to Vercel
-2. Add the 4 environment variables in Vercel dashboard
+2. Add the 6 environment variables in Vercel dashboard
 3. Deploy — no build configuration needed
 
 ---
