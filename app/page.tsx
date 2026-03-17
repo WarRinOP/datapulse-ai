@@ -115,7 +115,7 @@ export default function HomePage() {
   const [adminCode, setAdminCode] = useState('')
   const [adminError, setAdminError] = useState('')
   const [adminLoading, setAdminLoading] = useState(false)
-  const [simBlock, setSimBlock] = useState(false) // simulate IP-block mode
+  const [exhaustedTest, setExhaustedTest] = useState(false)
 
   // Initialize session
   useEffect(() => {
@@ -167,8 +167,8 @@ export default function HomePage() {
       formData.append('file', parsedFile.file)
       formData.append('session_id', sessionId)
       const headers: Record<string, string> = {}
-      if (admin) headers['x-admin-key'] = getAdminKey()
-      if (simBlock) headers['x-simulate-block'] = 'true'
+      // Check Block mode: omit admin key so real rate limit code applies
+      if (admin && !exhaustedTest) headers['x-admin-key'] = getAdminKey()
       const res = await fetch('/api/analyze', { method: 'POST', body: formData, headers })
       const data = await res.json()
       if (!res.ok) {
@@ -203,8 +203,8 @@ export default function HomePage() {
     setUploadState('analyzing')
     try {
       const hdrs: Record<string, string> = { 'Content-Type': 'application/json' }
-      if (admin) hdrs['x-admin-key'] = getAdminKey()
-      if (simBlock) hdrs['x-simulate-block'] = 'true'
+      // Check Block mode: omit admin key so real rate limit code applies
+      if (admin && !exhaustedTest) hdrs['x-admin-key'] = getAdminKey()
       const res = await fetch('/api/seed', {
         method: 'POST',
         headers: hdrs,
@@ -234,6 +234,27 @@ export default function HomePage() {
   }
 
   const limitReached = !admin && remaining <= 0
+
+  async function exhaustSession(action: 'exhaust' | 'reset' = 'exhaust') {
+    const sid = sessionId
+    const res = await fetch('/api/admin/exhaust-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-key': getAdminKey() },
+      body: JSON.stringify({ session_id: sid, action }),
+    })
+    if (res.ok) {
+      if (action === 'exhaust') {
+        setExhaustedTest(true)
+        setRemaining(0)
+        setStoredRemaining(0)
+        showToast('Session exhausted — try analyzing to test the real block', 'info')
+      } else {
+        setExhaustedTest(false)
+        setRemaining(999)
+        showToast('Session reset — back to unlimited mode', 'success')
+      }
+    }
+  }
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -271,7 +292,7 @@ export default function HomePage() {
             fontFamily: '"JetBrains Mono", monospace',
             color: limitReached ? '#ef4444' : admin ? '#22c55e' : '#4b5675',
           }}>
-            {simBlock ? '⚠ Simulate ON' : admin ? '∞ Unlimited' : limitReached ? '❌ Limit reached' : `${remaining}/${MAX_ANALYSES} remaining`}
+            {exhaustedTest ? '🔒 Check Block ON' : admin ? '∞ Unlimited' : limitReached ? '❌ Limit reached' : `${remaining}/${MAX_ANALYSES} remaining`}
           </div>
         </div>
       </div>
@@ -394,17 +415,24 @@ export default function HomePage() {
           {admin ? (
             <>
               <button
-                onClick={() => { clearAdminKey(); setAdmin(false); setSimBlock(false); setRemaining(getStoredRemaining()); showToast('Admin mode disabled', 'success') }}
+                onClick={() => { clearAdminKey(); setAdmin(false); setExhaustedTest(false); setRemaining(getStoredRemaining()); showToast('Admin mode disabled', 'success') }}
                 style={{ background: 'none', border: 'none', color: '#22c55e', fontSize: '10px', cursor: 'pointer', padding: '2px 6px' }}
               >
-                ✓ Admin active — click to disable
+                ✓ Admin active — disable
               </button>
-              <span style={{ color: '#2d3548', fontSize: '10px', margin: '0 4px' }}>|</span>
+              <span style={{ color: '#2d3548', fontSize: '10px', margin: '0 6px' }}>|</span>
               <button
-                onClick={() => setSimBlock(s => !s)}
-                style={{ background: 'none', border: 'none', fontSize: '10px', cursor: 'pointer', padding: '2px 6px', color: simBlock ? '#fbbf24' : '#4b5675' }}
+                onClick={() => exhaustedTest ? exhaustSession('reset') : undefined}
+                style={{ background: 'none', border: 'none', fontSize: '10px', cursor: exhaustedTest ? 'pointer' : 'default', fontWeight: exhaustedTest ? 400 : 700, color: exhaustedTest ? '#4b5675' : '#22c55e', textDecoration: exhaustedTest ? 'none' : 'underline', padding: '2px 4px' }}
               >
-                {simBlock ? '⚠ Block ON — click to unlock' : '🔒 Simulate IP Block'}
+                🔓 Unlimited Testing
+              </button>
+              <span style={{ color: '#2d3548', fontSize: '10px', margin: '0 4px' }}>/</span>
+              <button
+                onClick={() => !exhaustedTest ? exhaustSession('exhaust') : undefined}
+                style={{ background: 'none', border: 'none', fontSize: '10px', cursor: !exhaustedTest ? 'pointer' : 'default', fontWeight: !exhaustedTest ? 400 : 700, color: !exhaustedTest ? '#4b5675' : '#f59e0b', textDecoration: !exhaustedTest ? 'none' : 'underline', padding: '2px 4px' }}
+              >
+                🔒 Check Block
               </button>
             </>
           ) : (
