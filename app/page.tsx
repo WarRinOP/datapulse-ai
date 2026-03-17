@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { FileUpload } from '@/components/upload/FileUpload'
 import { DataPreview } from '@/components/upload/DataPreview'
 import { useToast } from '@/components/ui/Toast'
+import { getSessionId, getStoredRemaining, setStoredRemaining, MAX_ANALYSES } from '@/lib/session'
 import type { DpAnalysis } from '@/lib/supabase'
 
 type UploadState = 'idle' | 'selected' | 'analyzing' | 'done'
@@ -107,9 +108,17 @@ export default function HomePage() {
   const [parsedFile, setParsedFile] = useState<ParsedFile | null>(null)
   const [recentAnalyses, setRecentAnalyses] = useState<DpAnalysis[] | null>(null) // null = loading
   const [seeding, setSeeding] = useState(false)
+  const [remaining, setRemaining] = useState(MAX_ANALYSES)
+  const [sessionId, setSessionId] = useState('')
 
+  // Initialize session
   useEffect(() => {
-    fetch('/api/analyses')
+    const sid = getSessionId()
+    setSessionId(sid)
+    setRemaining(getStoredRemaining())
+
+    // Fetch recent — scoped to this session
+    fetch(`/api/analyses?session_id=${encodeURIComponent(sid)}`)
       .then((r) => r.json())
       .then((d) => setRecentAnalyses((d.analyses ?? []).slice(0, 3)))
       .catch(() => setRecentAnalyses([])) // silent fail → empty
@@ -141,13 +150,30 @@ export default function HomePage() {
 
   const handleAnalyze = async () => {
     if (!parsedFile) return
+    if (remaining <= 0) {
+      showToast('Analysis limit reached. Contact Abrar Tajwar Khan for unlimited access.', 'error')
+      return
+    }
     setUploadState('analyzing')
     try {
       const formData = new FormData()
       formData.append('file', parsedFile.file)
+      formData.append('session_id', sessionId)
       const res = await fetch('/api/analyze', { method: 'POST', body: formData })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Analysis failed')
+      if (!res.ok) {
+        if (data.code === 'RATE_LIMIT') {
+          setRemaining(0)
+          setStoredRemaining(0)
+          showToast('Analysis limit reached for this session', 'error')
+          setUploadState('idle')
+          return
+        }
+        throw new Error(data.error || 'Analysis failed')
+      }
+      const newRemaining = data.remaining ?? remaining - 1
+      setRemaining(newRemaining)
+      setStoredRemaining(newRemaining)
       setUploadState('done')
       router.push(`/analysis/${data.analysis.id}`)
     } catch (err) {
@@ -159,12 +185,32 @@ export default function HomePage() {
   const handleReset = () => { setParsedFile(null); setUploadState('idle') }
 
   const handleLoadDemo = async () => {
+    if (remaining <= 0) {
+      showToast('Analysis limit reached. Contact Abrar Tajwar Khan for unlimited access.', 'error')
+      return
+    }
     setSeeding(true)
     setUploadState('analyzing')
     try {
-      const res = await fetch('/api/seed', { method: 'POST' })
+      const res = await fetch('/api/seed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId }),
+      })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Seed failed')
+      if (!res.ok) {
+        if (data.code === 'RATE_LIMIT') {
+          setRemaining(0)
+          setStoredRemaining(0)
+          showToast('Analysis limit reached for this session', 'error')
+          setUploadState('idle')
+          return
+        }
+        throw new Error(data.error || 'Seed failed')
+      }
+      const newRemaining = data.remaining ?? remaining - 1
+      setRemaining(newRemaining)
+      setStoredRemaining(newRemaining)
       router.push(`/analysis/${data.id}`)
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Demo load failed', 'error')
@@ -173,6 +219,8 @@ export default function HomePage() {
       setSeeding(false)
     }
   }
+
+  const limitReached = remaining <= 0
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -189,7 +237,7 @@ export default function HomePage() {
         </p>
         <p style={{ fontSize: '12px', color: '#4b5675', marginBottom: '20px' }}>CSV or Excel · Up to 10MB</p>
 
-        {/* Feature pills — wrap naturally on mobile */}
+        {/* Feature pills + Remaining badge */}
         <div style={{ display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '32px' }}>
           {[['📊', 'Auto Charts'], ['🤖', 'AI Narrative'], ['💬', 'Ask Questions']].map(([icon, label]) => (
             <div key={label} style={{
@@ -201,6 +249,17 @@ export default function HomePage() {
               <span>{icon}</span> {label}
             </div>
           ))}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '6px',
+            padding: '5px 14px', borderRadius: '20px',
+            background: limitReached ? 'rgba(239,68,68,0.08)' : '#171923',
+            border: `1px solid ${limitReached ? 'rgba(239,68,68,0.3)' : '#1f2433'}`,
+            fontSize: '12px',
+            fontFamily: '"JetBrains Mono", monospace',
+            color: limitReached ? '#ef4444' : '#4b5675',
+          }}>
+            {limitReached ? '❌ Limit reached' : `${remaining}/${MAX_ANALYSES} remaining`}
+          </div>
         </div>
       </div>
 
@@ -210,18 +269,36 @@ export default function HomePage() {
 
         {uploadState === 'idle' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <FileUpload onFileSelect={handleFileSelect} />
+            {!limitReached && <FileUpload onFileSelect={handleFileSelect} />}
+            {limitReached && (
+              <div style={{
+                textAlign: 'center', padding: '40px 24px',
+                background: '#0d1017', border: '1px solid rgba(239,68,68,0.2)',
+                borderRadius: '12px',
+              }}>
+                <div style={{ fontSize: '40px', marginBottom: '16px' }}>🔒</div>
+                <div style={{ fontSize: '16px', fontWeight: '600', color: '#f8fafc', marginBottom: '8px' }}>
+                  Demo limit reached
+                </div>
+                <div style={{ fontSize: '14px', color: '#94a3b8', lineHeight: 1.7 }}>
+                  You&apos;ve used all {MAX_ANALYSES} analyses in this demo session.<br />
+                  Want unlimited access? <span style={{ color: '#818cf8', fontWeight: '500' }}>Contact Abrar Tajwar Khan</span> for a custom build.
+                </div>
+              </div>
+            )}
             {/* Demo button */}
-            <div style={{ textAlign: 'center' }}>
-              <button
-                onClick={handleLoadDemo}
-                disabled={seeding}
-                className="btn btn-ghost btn-sm"
-                style={{ color: '#818cf8', borderColor: 'rgba(129,140,248,0.25)' }}
-              >
-                {seeding ? <><span className="spinner spinner-sm" /> Loading…</> : '✨ Try with sample data →'}
-              </button>
-            </div>
+            {!limitReached && (
+              <div style={{ textAlign: 'center' }}>
+                <button
+                  onClick={handleLoadDemo}
+                  disabled={seeding}
+                  className="btn btn-ghost btn-sm"
+                  style={{ color: '#818cf8', borderColor: 'rgba(129,140,248,0.25)' }}
+                >
+                  {seeding ? <><span className="spinner spinner-sm" /> Loading…</> : '✨ Try with sample data →'}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -293,6 +370,14 @@ export default function HomePage() {
           )}
         </div>
       )}
+
+      {/* Footer */}
+      <footer style={{
+        marginTop: 'auto', padding: '20px 16px', textAlign: 'center',
+        borderTop: '1px solid #1f2433', fontSize: '12px', color: '#4b5675',
+      }}>
+        Built by <span style={{ color: '#94a3b8', fontWeight: '500' }}>Abrar Tajwar Khan</span>
+      </footer>
     </div>
   )
 }

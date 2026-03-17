@@ -7,7 +7,6 @@ import type { DpAnalysis } from '@/lib/supabase'
 interface AnalysisTableProps {
   analyses: DpAnalysis[]
   isLoading: boolean
-  onDelete: (id: string) => void
   emptyType?: 'no-data' | 'no-results'
 }
 
@@ -42,7 +41,7 @@ function fileIcon(fileType: string): string {
 function SkeletonRow() {
   return (
     <tr>
-      {Array.from({ length: 6 }).map((_, i) => (
+      {Array.from({ length: 5 }).map((_, i) => (
         <td key={i} style={{ padding: '14px 16px' }}>
           <div className="skeleton" style={{ height: '13px', width: i === 0 ? '140px' : '60px', borderRadius: '4px' }} />
         </td>
@@ -51,46 +50,8 @@ function SkeletonRow() {
   )
 }
 
-interface DeleteDialogProps {
-  onConfirm: () => void
-  onCancel: () => void
-}
-
-function DeleteDialog({ onConfirm, onCancel }: DeleteDialogProps) {
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 100,
-      background: 'rgba(0,0,0,0.7)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: '20px',
-    }} onClick={onCancel}>
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: '#0f1117', border: '1px solid #2d3548',
-          borderRadius: '14px', padding: '28px 32px',
-          maxWidth: '420px', width: '100%',
-          boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
-        }}
-      >
-        <div style={{ fontSize: '17px', fontWeight: '600', color: '#f8fafc', marginBottom: '10px' }}>
-          Delete this analysis?
-        </div>
-        <div style={{ fontSize: '14px', color: '#94a3b8', marginBottom: '24px', lineHeight: 1.6 }}>
-          This cannot be undone. The analysis and all associated Q&amp;A messages will be permanently removed.
-        </div>
-        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-          <button className="btn btn-ghost btn-md" onClick={onCancel}>Cancel</button>
-          <button className="btn btn-danger btn-md" onClick={onConfirm}>Delete</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-export function AnalysisTable({ analyses, isLoading, onDelete, emptyType = 'no-data' }: AnalysisTableProps) {
+export function AnalysisTable({ analyses, isLoading, emptyType = 'no-data' }: AnalysisTableProps) {
   const [page, setPage] = useState(0)
-  const [confirmId, setConfirmId] = useState<string | null>(null)
 
   const totalPages = Math.ceil(analyses.length / PAGE_SIZE)
   const paginated = analyses.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)
@@ -138,18 +99,11 @@ export function AnalysisTable({ analyses, isLoading, onDelete, emptyType = 'no-d
 
   return (
     <>
-      {confirmId && (
-        <DeleteDialog
-          onConfirm={() => { onDelete(confirmId); setConfirmId(null) }}
-          onCancel={() => setConfirmId(null)}
-        />
-      )}
-
       <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid #1f2433' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', minWidth: '640px' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', minWidth: '540px' }}>
           <thead>
             <tr style={{ background: '#171923', borderBottom: '1px solid #1f2433' }}>
-              {['File', 'Rows', 'Cols', 'Preview', 'Date', 'Actions'].map((h) => (
+              {['File', 'Rows', 'Cols', 'Preview', 'Date'].map((h) => (
                 <th key={h} style={{
                   padding: '11px 16px', textAlign: 'left',
                   fontSize: '11px', fontWeight: '600',
@@ -173,9 +127,11 @@ export function AnalysisTable({ analyses, isLoading, onDelete, emptyType = 'no-d
                       style={{
                         borderBottom: isLast ? 'none' : '1px solid #1f2433',
                         transition: 'background 0.1s',
+                        cursor: 'pointer',
                       }}
                       onMouseEnter={(e) => (e.currentTarget.style.background = '#171923')}
                       onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                      onClick={() => window.location.href = `/analysis/${a.id}`}
                     >
                       {/* File */}
                       <td style={{ padding: '13px 16px', whiteSpace: 'nowrap', maxWidth: '200px' }}>
@@ -214,25 +170,6 @@ export function AnalysisTable({ analyses, isLoading, onDelete, emptyType = 'no-d
                       {/* Date */}
                       <td style={{ padding: '13px 16px', whiteSpace: 'nowrap' }} title={fullDate(a.created_at)}>
                         <span style={{ color: '#94a3b8' }}>{relativeTime(a.created_at)}</span>
-                      </td>
-                      {/* Actions */}
-                      <td style={{ padding: '13px 16px', whiteSpace: 'nowrap' }}>
-                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                          <Link
-                            href={`/analysis/${a.id}`}
-                            className="btn btn-secondary btn-sm"
-                          >
-                            View →
-                          </Link>
-                          <button
-                            onClick={() => setConfirmId(a.id)}
-                            className="btn btn-ghost btn-sm"
-                            style={{ color: '#ef4444', padding: '5px 8px' }}
-                            title="Delete analysis"
-                          >
-                            🗑
-                          </button>
-                        </div>
                       </td>
                     </tr>
                   )

@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { askQuestion } from '@/lib/claude'
 import { createServerSupabaseClient } from '@/lib/supabase'
 
+const MAX_QA_PER_SESSION = 20
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { analysisId, question, messageHistory = [] } = body
+    const { analysisId, question, messageHistory = [], session_id = '' } = body
 
     // ── Validate ──────────────────────────────────
     if (!analysisId) {
@@ -16,6 +18,22 @@ export async function POST(req: NextRequest) {
     }
 
     const supabase = createServerSupabaseClient()
+
+    // ── Rate limit Q&A by session ─────────────────
+    if (session_id) {
+      const { count } = await supabase
+        .from('dp_qa_messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('analysis_id', analysisId)
+        .eq('role', 'user')
+
+      if (count !== null && count >= MAX_QA_PER_SESSION) {
+        return NextResponse.json(
+          { error: 'Q&A limit reached for this analysis', code: 'RATE_LIMIT' },
+          { status: 429 }
+        )
+      }
+    }
 
     // ── Fetch analysis context ─────────────────────
     const { data: analysis, error: fetchError } = await supabase
@@ -60,15 +78,10 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Save both messages ─────────────────────────
-    const { error: insertError } = await supabase.from('dp_qa_messages').insert([
-      { analysis_id: analysisId, role: 'user',      content: question.trim() },
+    await supabase.from('dp_qa_messages').insert([
+      { analysis_id: analysisId, role: 'user', content: question.trim() },
       { analysis_id: analysisId, role: 'assistant', content: answer },
     ])
-
-    if (insertError) {
-      // Non-fatal — still return the answer
-      console.error('Failed to save QA messages:', insertError.message)
-    }
 
     return NextResponse.json({ answer }, { status: 200 })
   } catch (err) {

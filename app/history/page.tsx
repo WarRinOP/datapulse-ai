@@ -1,11 +1,12 @@
 'use client'
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { HistoryStats } from '@/components/history/HistoryStats'
 import { AnalysisTable } from '@/components/history/AnalysisTable'
 import { FilterBar } from '@/components/history/FilterBar'
 import { useToast } from '@/components/ui/Toast'
+import { getSessionId } from '@/lib/session'
 import type { DpAnalysis } from '@/lib/supabase'
 
 function isWithinDays(dateStr: string, days: number) {
@@ -21,9 +22,10 @@ export default function HistoryPage() {
   const [search, setSearch] = useState('')
   const [period, setPeriod] = useState<'all' | 'month' | 'week'>('all')
 
-  // Fetch all analyses once on mount
+  // Fetch analyses scoped to this session
   useEffect(() => {
-    fetch('/api/analyses')
+    const sid = getSessionId()
+    fetch(`/api/analyses?session_id=${encodeURIComponent(sid)}`)
       .then((r) => r.json())
       .then((d) => setAllAnalyses(d.analyses ?? []))
       .catch(() => showToast('Failed to load analyses', 'error'))
@@ -42,28 +44,6 @@ export default function HistoryPage() {
     return result
   }, [allAnalyses, search, period])
 
-  // Optimistic delete
-  const handleDelete = useCallback(async (id: string) => {
-    // Remove immediately from local state
-    setAllAnalyses((prev) => prev.filter((a) => a.id !== id))
-    try {
-      const res = await fetch('/api/analyses', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
-      })
-      if (!res.ok) throw new Error('Delete failed')
-      showToast('Analysis deleted', 'success')
-    } catch {
-      showToast('Failed to delete — please try again', 'error')
-      // Re-fetch to restore
-      fetch('/api/analyses')
-        .then((r) => r.json())
-        .then((d) => setAllAnalyses(d.analyses ?? []))
-        .catch(() => {})
-    }
-  }, [showToast])
-
   const emptyType = search.trim() || period !== 'all' ? 'no-results' : 'no-data'
 
   return (
@@ -80,7 +60,7 @@ export default function HistoryPage() {
             color: '#f8fafc', margin: '0 0 6px',
           }}>Analysis History</h1>
           <p style={{ fontSize: '14px', color: '#4b5675', margin: 0 }}>
-            All your past data analyses
+            Your past data analyses
           </p>
         </div>
         <Link href="/" className="btn btn-primary btn-md">
@@ -105,11 +85,10 @@ export default function HistoryPage() {
         />
       </div>
 
-      {/* Table */}
+      {/* Table — no delete */}
       <AnalysisTable
         analyses={filteredAnalyses}
         isLoading={isLoading}
-        onDelete={handleDelete}
         emptyType={emptyType}
       />
     </div>

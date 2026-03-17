@@ -4,11 +4,13 @@ import { analyzeDataset } from '@/lib/claude'
 import { createServerSupabaseClient } from '@/lib/supabase'
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
+const MAX_ANALYSES = 5
 
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData()
     const file = formData.get('file') as File | null
+    const sessionId = (formData.get('session_id') as string) || ''
 
     // ── Validate ──────────────────────────────────
     if (!file) {
@@ -30,6 +32,40 @@ export async function POST(req: NextRequest) {
         { error: 'Unsupported file type. Upload a .csv, .xlsx, or .xls file.' },
         { status: 400 }
       )
+    }
+
+    // ── Rate limiting ─────────────────────────────
+    if (sessionId) {
+      const supabaseRL = createServerSupabaseClient()
+
+      // Check session usage
+      const { data: session } = await supabaseRL
+        .from('dp_sessions')
+        .select('usage_count')
+        .eq('session_id', sessionId)
+        .single()
+
+      if (session && session.usage_count >= MAX_ANALYSES) {
+        return NextResponse.json(
+          { error: 'Analysis limit reached for this session', code: 'RATE_LIMIT', remaining: 0 },
+          { status: 429 }
+        )
+      }
+
+      // Secondary IP check
+      const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+      const { data: ipSessions } = await supabaseRL
+        .from('dp_sessions')
+        .select('usage_count')
+        .eq('ip_address', ip)
+
+      const totalIpUsage = (ipSessions || []).reduce((sum, s) => sum + (s.usage_count || 0), 0)
+      if (totalIpUsage >= MAX_ANALYSES * 3) {
+        return NextResponse.json(
+          { error: 'Rate limit exceeded', code: 'RATE_LIMIT', remaining: 0 },
+          { status: 429 }
+        )
+      }
     }
 
     // ── Parse ──────────────────────────────────────
@@ -94,6 +130,7 @@ export async function POST(req: NextRequest) {
         key_metrics: analysis.key_metrics,
         chart_configs: analysis.chart_configs,
         recommendations: analysis.recommendations,
+        session_id: sessionId || null,
       })
       .select()
       .single()
@@ -105,7 +142,35 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    return NextResponse.json({ analysis: data }, { status: 200 })
+    // ── Update session usage ──────────────────────
+    let remaining = MAX_ANALYSES - 1
+    if (sessionId) {
+      const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+
+      const { data: existing } = await supabase
+        .from('dp_sessions')
+        .select('usage_count')
+        .eq('session_id', sessionId)
+        .single()
+
+      if (existing) {
+        const newCount = existing.usage_count + 1
+        await supabase
+          .from('dp_sessions')
+          .update({ usage_count: newCount, ip_address: ip })
+          .eq('session_id', sessionId)
+        remaining = Math.max(0, MAX_ANALYSES - newCount)
+      } else {
+        await supabase
+          .from('dp_sessions')
+          .insert({ session_id: sessionId, ip_address: ip, usage_count: 1 })
+        remaining = MAX_ANALYSES - 1
+      }
+
+      return NextResponse.json({ analysis: data, remaining }, { status: 200 })
+    }
+
+    return NextResponse.json({ analysis: data, remaining: MAX_ANALYSES }, { status: 200 })
   } catch (err) {
     return NextResponse.json(
       { error: `Unexpected error: ${err instanceof Error ? err.message : 'Unknown'}` },

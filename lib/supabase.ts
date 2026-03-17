@@ -45,6 +45,7 @@ export interface DpAnalysis {
   key_metrics: KeyMetric[]
   chart_configs: ChartConfig[]
   recommendations: string[]
+  session_id?: string
   created_at: string
 }
 

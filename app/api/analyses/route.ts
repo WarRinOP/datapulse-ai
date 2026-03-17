@@ -7,12 +7,18 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const search = searchParams.get('search') ?? ''
     const period = searchParams.get('period') ?? 'all'
+    const sessionId = searchParams.get('session_id') ?? ''
 
     const supabase = createServerSupabaseClient()
     let query = supabase
       .from('dp_analyses')
-      .select('id, filename, file_type, row_count, column_count, columns, narrative, key_metrics, chart_configs, recommendations, created_at')
+      .select('id, filename, file_type, row_count, column_count, columns, narrative, key_metrics, chart_configs, recommendations, session_id, created_at')
       .order('created_at', { ascending: false })
+
+    // Session scoping — only show this user's analyses
+    if (sessionId) {
+      query = query.eq('session_id', sessionId)
+    }
 
     // Filter by filename search
     if (search.trim()) {
@@ -48,6 +54,14 @@ export async function GET(req: NextRequest) {
 // ── DELETE /api/analyses ───────────────────────────
 export async function DELETE(req: NextRequest) {
   try {
+    // Block deletion in demo mode
+    if (process.env.DEMO_MODE === 'true') {
+      return NextResponse.json(
+        { error: 'Deletion is disabled in demo mode' },
+        { status: 403 }
+      )
+    }
+
     const body = await req.json()
     const { id } = body
 

@@ -39,6 +39,7 @@ export function QAPanel({ analysisId, initialMessages = [] }: QAPanelProps) {
     setLoading(true)
 
     try {
+      const sessionId = typeof window !== 'undefined' ? localStorage.getItem('dp_session_id') || '' : ''
       const res = await fetch('/api/qa', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -46,6 +47,7 @@ export function QAPanel({ analysisId, initialMessages = [] }: QAPanelProps) {
           analysisId,
           question: q,
           messageHistory: messages.slice(-10),
+          session_id: sessionId,
         }),
       })
       const data = await res.json()
