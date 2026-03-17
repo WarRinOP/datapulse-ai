@@ -1,6 +1,6 @@
 'use client'
 
-import React from 'react'
+import React, { useState } from 'react'
 import type { KeyMetric } from '@/lib/supabase'
 
 interface MetricsRowProps {
@@ -16,8 +16,25 @@ const trendConfig = {
 
 function MetricCard({ metric }: { metric: KeyMetric }) {
   const trend = trendConfig[metric.trend] ?? trendConfig.stable
+  const [expanded, setExpanded] = useState(false)
+
+  // Check if text is long enough to be truncated (rough: >80 chars = likely 2+ lines)
+  const isLong = metric.significance && metric.significance.length > 80
+
   return (
-    <div className="card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+    <div
+      className="card"
+      style={{
+        padding: '18px 20px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '6px',
+        cursor: isLong ? 'pointer' : 'default',
+        transition: 'border-color 0.2s',
+      }}
+      onClick={() => isLong && setExpanded((e) => !e)}
+      title={isLong && !expanded ? 'Click to read more' : undefined}
+    >
       <div className="label-caps">{metric.label}</div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
         <div style={{
@@ -36,14 +53,27 @@ function MetricCard({ metric }: { metric: KeyMetric }) {
       {metric.significance && (
         <div style={{
           fontSize: '11px', color: '#4b5675',
-          fontStyle: 'italic', lineHeight: 1.4,
-          overflow: 'hidden',
-          display: '-webkit-box',
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: 'vertical',
+          fontStyle: 'italic', lineHeight: 1.5,
+          ...(expanded ? {} : {
+            overflow: 'hidden',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical' as const,
+          }),
+          transition: 'all 0.2s ease',
         }}>
           {metric.significance}
         </div>
+      )}
+      {isLong && (
+        <span style={{
+          fontSize: '10px',
+          color: '#818cf8',
+          fontWeight: 500,
+          marginTop: '2px',
+        }}>
+          {expanded ? '↑ Show less' : '↓ Read more'}
+        </span>
       )}
     </div>
   )
