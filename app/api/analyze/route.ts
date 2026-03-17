@@ -34,15 +34,18 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── Rate limiting ─────────────────────────────
-    // ── Rate limiting ─────────────────────────────
+    // ── Admin bypass ──────────────────────────────
+    const adminKey = req.headers.get('x-admin-key') || ''
+    const isAdmin = adminKey && adminKey === process.env.ADMIN_SECRET
+
+    // ── Rate limiting (skipped for admin) ─────────
     const supabaseRL = createServerSupabaseClient()
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
       || req.headers.get('x-real-ip')
       || 'unknown'
 
     // 1) Session-based check
-    if (sessionId) {
+    if (!isAdmin && sessionId) {
       const { data: session } = await supabaseRL
         .from('dp_sessions')
         .select('usage_count')
@@ -58,7 +61,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 2) IP-based check — blocks switching browsers on the same network
-    if (ip !== 'unknown') {
+    if (!isAdmin && ip !== 'unknown') {
       const { data: ipSessions } = await supabaseRL
         .from('dp_sessions')
         .select('usage_count')
@@ -171,10 +174,10 @@ export async function POST(req: NextRequest) {
         remaining = MAX_ANALYSES - 1
       }
 
-      return NextResponse.json({ analysis: data, remaining }, { status: 200 })
+      return NextResponse.json({ analysis: data, remaining: isAdmin ? 999 : remaining }, { status: 200 })
     }
 
-    return NextResponse.json({ analysis: data, remaining: MAX_ANALYSES }, { status: 200 })
+    return NextResponse.json({ analysis: data, remaining: isAdmin ? 999 : MAX_ANALYSES }, { status: 200 })
   } catch (err) {
     return NextResponse.json(
       { error: `Unexpected error: ${err instanceof Error ? err.message : 'Unknown'}` },

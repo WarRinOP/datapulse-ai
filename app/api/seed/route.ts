@@ -20,8 +20,12 @@ export async function POST(req: NextRequest) {
       || req.headers.get('x-real-ip')
       || 'unknown'
 
-    // ── Rate limit: session check ───────────────────
-    if (sessionId) {
+    // ── Admin bypass ────────────────────────────────
+    const adminKey = req.headers.get('x-admin-key') || ''
+    const isAdmin = adminKey && adminKey === process.env.ADMIN_SECRET
+
+    // ── Rate limit: session check (skipped for admin) ──
+    if (!isAdmin && sessionId) {
       const { data: session } = await supabase
         .from('dp_sessions')
         .select('usage_count')
@@ -36,8 +40,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Rate limit: IP check — blocks browser switching ─
-    if (ip !== 'unknown') {
+    // ── Rate limit: IP check — blocks browser switching (skipped for admin) ─
+    if (!isAdmin && ip !== 'unknown') {
       const { data: ipSessions } = await supabase
         .from('dp_sessions')
         .select('usage_count')
@@ -125,7 +129,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ id: data.id, remaining })
+    return NextResponse.json({ id: data.id, remaining: isAdmin ? 999 : remaining })
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Seed failed' },

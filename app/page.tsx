@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { FileUpload } from '@/components/upload/FileUpload'
 import { DataPreview } from '@/components/upload/DataPreview'
 import { useToast } from '@/components/ui/Toast'
-import { getSessionId, getStoredRemaining, setStoredRemaining, MAX_ANALYSES } from '@/lib/session'
+import { getSessionId, getStoredRemaining, setStoredRemaining, MAX_ANALYSES, getAdminKey, setAdminKey, clearAdminKey, isAdminMode } from '@/lib/session'
 import type { DpAnalysis } from '@/lib/supabase'
 
 type UploadState = 'idle' | 'selected' | 'analyzing' | 'done'
@@ -110,12 +110,18 @@ export default function HomePage() {
   const [seeding, setSeeding] = useState(false)
   const [remaining, setRemaining] = useState(MAX_ANALYSES)
   const [sessionId, setSessionId] = useState('')
+  const [admin, setAdmin] = useState(false)
+  const [showAdminInput, setShowAdminInput] = useState(false)
+  const [adminCode, setAdminCode] = useState('')
+  const [adminError, setAdminError] = useState('')
+  const [adminLoading, setAdminLoading] = useState(false)
 
   // Initialize session
   useEffect(() => {
     const sid = getSessionId()
     setSessionId(sid)
-    setRemaining(getStoredRemaining())
+    setRemaining(isAdminMode() ? 999 : getStoredRemaining())
+    setAdmin(isAdminMode())
 
     // Fetch recent — scoped to this session
     fetch(`/api/analyses?session_id=${encodeURIComponent(sid)}`)
@@ -150,7 +156,7 @@ export default function HomePage() {
 
   const handleAnalyze = async () => {
     if (!parsedFile) return
-    if (remaining <= 0) {
+    if (!admin && remaining <= 0) {
       showToast('Analysis limit reached. Contact Abrar Tajwar Khan for unlimited access.', 'error')
       return
     }
@@ -159,7 +165,9 @@ export default function HomePage() {
       const formData = new FormData()
       formData.append('file', parsedFile.file)
       formData.append('session_id', sessionId)
-      const res = await fetch('/api/analyze', { method: 'POST', body: formData })
+      const headers: Record<string, string> = {}
+      if (admin) headers['x-admin-key'] = getAdminKey()
+      const res = await fetch('/api/analyze', { method: 'POST', body: formData, headers })
       const data = await res.json()
       if (!res.ok) {
         if (data.code === 'RATE_LIMIT') {
@@ -185,16 +193,18 @@ export default function HomePage() {
   const handleReset = () => { setParsedFile(null); setUploadState('idle') }
 
   const handleLoadDemo = async () => {
-    if (remaining <= 0) {
+    if (!admin && remaining <= 0) {
       showToast('Analysis limit reached. Contact Abrar Tajwar Khan for unlimited access.', 'error')
       return
     }
     setSeeding(true)
     setUploadState('analyzing')
     try {
+      const hdrs: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (admin) hdrs['x-admin-key'] = getAdminKey()
       const res = await fetch('/api/seed', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: hdrs,
         body: JSON.stringify({ session_id: sessionId }),
       })
       const data = await res.json()
@@ -220,7 +230,7 @@ export default function HomePage() {
     }
   }
 
-  const limitReached = remaining <= 0
+  const limitReached = !admin && remaining <= 0
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -253,12 +263,12 @@ export default function HomePage() {
             display: 'flex', alignItems: 'center', gap: '6px',
             padding: '5px 14px', borderRadius: '20px',
             background: limitReached ? 'rgba(239,68,68,0.08)' : '#171923',
-            border: `1px solid ${limitReached ? 'rgba(239,68,68,0.3)' : '#1f2433'}`,
+            border: `1px solid ${limitReached ? 'rgba(239,68,68,0.3)' : admin ? 'rgba(34,197,94,0.3)' : '#1f2433'}`,
             fontSize: '12px',
             fontFamily: '"JetBrains Mono", monospace',
-            color: limitReached ? '#ef4444' : '#4b5675',
+            color: limitReached ? '#ef4444' : admin ? '#22c55e' : '#4b5675',
           }}>
-            {limitReached ? '❌ Limit reached' : `${remaining}/${MAX_ANALYSES} remaining`}
+            {admin ? '∞ Unlimited' : limitReached ? '❌ Limit reached' : `${remaining}/${MAX_ANALYSES} remaining`}
           </div>
         </div>
       </div>
@@ -376,8 +386,128 @@ export default function HomePage() {
         marginTop: 'auto', padding: '20px 16px', textAlign: 'center',
         borderTop: '1px solid #1f2433', fontSize: '12px', color: '#4b5675',
       }}>
-        Built by <span style={{ color: '#94a3b8', fontWeight: '500' }}>Abrar Tajwar Khan</span>
+        <div>Built by <span style={{ color: '#94a3b8', fontWeight: '500' }}>Abrar Tajwar Khan</span></div>
+        <div style={{ marginTop: '8px' }}>
+          {admin ? (
+            <button
+              onClick={() => { clearAdminKey(); setAdmin(false); setRemaining(getStoredRemaining()); showToast('Admin mode disabled', 'success') }}
+              style={{ background: 'none', border: 'none', color: '#22c55e', fontSize: '10px', cursor: 'pointer', padding: '2px 6px' }}
+            >
+              ✓ Admin active — click to disable
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowAdminInput(true)}
+              style={{ background: 'none', border: 'none', color: '#2d3548', fontSize: '10px', cursor: 'pointer', padding: '2px 6px' }}
+            >
+              Admin
+            </button>
+          )}
+        </div>
       </footer>
+
+      {/* Admin modal */}
+      {showAdminInput && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 200,
+            background: 'rgba(0,0,0,0.7)', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', padding: '20px',
+          }}
+          onClick={() => { setShowAdminInput(false); setAdminError(''); setAdminCode('') }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#0f1117', border: '1px solid #1f2433',
+              borderRadius: '14px', padding: '24px', maxWidth: '380px', width: '100%',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
+            }}
+          >
+            <div style={{ fontSize: '14px', fontWeight: '600', color: '#f8fafc', marginBottom: '6px' }}>
+              Are you the developer?
+            </div>
+            <div style={{ fontSize: '12px', color: '#4b5675', marginBottom: '16px' }}>
+              Enter the secret code you set for unlimited testing.
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                className="input"
+                type="password"
+                value={adminCode}
+                onChange={(e) => { setAdminCode(e.target.value); setAdminError('') }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    // Submit
+                    (async () => {
+                      setAdminLoading(true)
+                      try {
+                        const res = await fetch('/api/admin-verify', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ code: adminCode }),
+                        })
+                        const data = await res.json()
+                        if (data.valid) {
+                          setAdminKey(adminCode)
+                          setAdmin(true)
+                          setRemaining(999)
+                          setShowAdminInput(false)
+                          setAdminCode('')
+                          showToast('Admin mode enabled — unlimited access', 'success')
+                        } else {
+                          setAdminError('Invalid code')
+                        }
+                      } catch {
+                        setAdminError('Verification failed')
+                      } finally {
+                        setAdminLoading(false)
+                      }
+                    })()
+                  }
+                }}
+                placeholder="Secret code"
+                autoFocus
+                style={{ flex: 1, fontSize: '13px' }}
+              />
+              <button
+                className="btn btn-primary btn-md"
+                disabled={!adminCode.trim() || adminLoading}
+                onClick={async () => {
+                  setAdminLoading(true)
+                  try {
+                    const res = await fetch('/api/admin-verify', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ code: adminCode }),
+                    })
+                    const data = await res.json()
+                    if (data.valid) {
+                      setAdminKey(adminCode)
+                      setAdmin(true)
+                      setRemaining(999)
+                      setShowAdminInput(false)
+                      setAdminCode('')
+                      showToast('Admin mode enabled — unlimited access', 'success')
+                    } else {
+                      setAdminError('Invalid code')
+                    }
+                  } catch {
+                    setAdminError('Verification failed')
+                  } finally {
+                    setAdminLoading(false)
+                  }
+                }}
+              >
+                {adminLoading ? <span className="spinner spinner-sm" /> : 'Verify'}
+              </button>
+            </div>
+            {adminError && (
+              <div style={{ fontSize: '12px', color: '#ef4444', marginTop: '8px' }}>{adminError}</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
