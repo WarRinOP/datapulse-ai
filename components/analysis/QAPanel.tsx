@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react'
 import { useToast } from '@/components/ui/Toast'
+import { getAdminKey } from '@/lib/session'
 
 interface QAMessage {
   role: 'user' | 'assistant'
@@ -42,7 +43,10 @@ export function QAPanel({ analysisId, initialMessages = [] }: QAPanelProps) {
       const sessionId = typeof window !== 'undefined' ? localStorage.getItem('dp_session_id') || '' : ''
       const res = await fetch('/api/qa', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(getAdminKey() ? { 'x-admin-key': getAdminKey() } : {}),
+        },
         body: JSON.stringify({
           analysisId,
           question: q,

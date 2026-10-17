@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { parseCSV, parseExcel } from '@/lib/parser'
 import { analyzeDataset } from '@/lib/claude'
 import { createServerSupabaseClient } from '@/lib/supabase'
+import { reserveQuota, GuardConfig } from '@/lib/usage-guard'
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 const MAX_ANALYSES = 5
+const GUARD: GuardConfig = { prefix: 'dp', limit: MAX_ANALYSES, noun: 'analyses' }
 
 export async function POST(req: NextRequest) {
   try {
@@ -34,56 +36,6 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── Admin bypass ──────────────────────────────
-    const adminKey = req.headers.get('x-admin-key') || ''
-    const isAdmin = adminKey && adminKey === process.env.ADMIN_SECRET
-
-    // Simulate block mode — admin testing (fires BEFORE bypass so it actually blocks)
-    if (req.headers.get('x-simulate-block') === 'true' && adminKey === process.env.ADMIN_SECRET) {
-      return NextResponse.json(
-        { error: 'Rate limit exceeded for this network', code: 'RATE_LIMIT', remaining: 0 },
-        { status: 429 }
-      )
-    }
-
-    // ── Rate limiting (skipped for admin) ─────────
-    const supabaseRL = createServerSupabaseClient()
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-      || req.headers.get('x-real-ip')
-      || 'unknown'
-
-    // 1) Session-based check
-    if (!isAdmin && sessionId) {
-      const { data: session } = await supabaseRL
-        .from('dp_sessions')
-        .select('usage_count')
-        .eq('session_id', sessionId)
-        .single()
-
-      if (session && session.usage_count >= MAX_ANALYSES) {
-        return NextResponse.json(
-          { error: 'Analysis limit reached for this session', code: 'RATE_LIMIT', remaining: 0 },
-          { status: 429 }
-        )
-      }
-    }
-
-    // 2) IP-based check — blocks switching browsers on the same network
-    if (!isAdmin && ip !== 'unknown') {
-      const { data: ipSessions } = await supabaseRL
-        .from('dp_sessions')
-        .select('usage_count')
-        .eq('ip_address', ip)
-
-      const totalIpUsage = (ipSessions || []).reduce((sum, s) => sum + (s.usage_count || 0), 0)
-      if (totalIpUsage >= MAX_ANALYSES) {
-        return NextResponse.json(
-          { error: 'Rate limit exceeded for this network', code: 'RATE_LIMIT', remaining: 0 },
-          { status: 429 }
-        )
-      }
-    }
-
     // ── Parse ──────────────────────────────────────
     let parsed
     try {
@@ -105,6 +57,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'File is empty — no data rows found.' }, { status: 400 })
     }
 
+    // ── Usage limit: atomic, per device and per network address ──
+    const supabase = createServerSupabaseClient()
+    const reservation = await reserveQuota(req, supabase, GUARD)
+    if (!reservation.ok) return reservation.response
+
     // ── Claude analysis ────────────────────────────
     let analysis
     try {
@@ -118,20 +75,18 @@ export async function POST(req: NextRequest) {
       })
     } catch (claudeError) {
       const msg = claudeError instanceof Error ? claudeError.message : 'Unknown error'
+      await reservation.refund()
       if (msg.includes('parse') || msg.includes('JSON')) {
-        return NextResponse.json(
-          { error: 'Failed to parse Claude response. Try again.' },
-          { status: 500 }
+        return reservation.respond(
+          NextResponse.json({ error: 'Failed to parse Claude response. Try again.' }, { status: 500 })
         )
       }
-      return NextResponse.json(
-        { error: `Claude error: ${msg}` },
-        { status: 500 }
+      return reservation.respond(
+        NextResponse.json({ error: `Claude error: ${msg}` }, { status: 500 })
       )
     }
 
     // ── Save to Supabase ───────────────────────────
-    const supabase = createServerSupabaseClient()
     const { data, error: dbError } = await supabase
       .from('dp_analyses')
       .insert({
@@ -158,34 +113,9 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── Update session usage ──────────────────────
-    let remaining = MAX_ANALYSES - 1
-    if (sessionId) {
-
-      const { data: existing } = await supabase
-        .from('dp_sessions')
-        .select('usage_count')
-        .eq('session_id', sessionId)
-        .single()
-
-      if (existing) {
-        const newCount = existing.usage_count + 1
-        await supabase
-          .from('dp_sessions')
-          .update({ usage_count: newCount, ip_address: ip })
-          .eq('session_id', sessionId)
-        remaining = Math.max(0, MAX_ANALYSES - newCount)
-      } else {
-        await supabase
-          .from('dp_sessions')
-          .insert({ session_id: sessionId, ip_address: ip, usage_count: 1 })
-        remaining = MAX_ANALYSES - 1
-      }
-
-      return NextResponse.json({ analysis: data, remaining: isAdmin ? 999 : remaining }, { status: 200 })
-    }
-
-    return NextResponse.json({ analysis: data, remaining: isAdmin ? 999 : MAX_ANALYSES }, { status: 200 })
+    return reservation.respond(
+      NextResponse.json({ analysis: data, remaining: reservation.remaining }, { status: 200 })
+    )
   } catch (err) {
     return NextResponse.json(
       { error: `Unexpected error: ${err instanceof Error ? err.message : 'Unknown'}` },

@@ -3,10 +3,12 @@ import { generateDemoCSV } from '@/lib/seed-demo'
 import { parseCSV } from '@/lib/parser'
 import { analyzeDataset } from '@/lib/claude'
 import { createServerSupabaseClient } from '@/lib/supabase'
+import { reserveQuota, GuardConfig } from '@/lib/usage-guard'
 
 export const dynamic = 'force-dynamic'
 
 const MAX_ANALYSES = 5
+const GUARD: GuardConfig = { prefix: 'dp', limit: MAX_ANALYSES, noun: 'analyses' }
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,53 +18,9 @@ export async function POST(req: NextRequest) {
     const supabase = createServerSupabaseClient()
     const DEMO_FILENAME = 'demo_sales_data.csv'
 
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-      || req.headers.get('x-real-ip')
-      || 'unknown'
-
-    // ── Admin bypass ────────────────────────────────
-    const adminKey = req.headers.get('x-admin-key') || ''
-    const isAdmin = adminKey && adminKey === process.env.ADMIN_SECRET
-
-    // Simulate block mode — must check BEFORE admin bypass
-    if (req.headers.get('x-simulate-block') === 'true' && adminKey === process.env.ADMIN_SECRET) {
-      return NextResponse.json(
-        { error: 'Rate limit exceeded for this network', code: 'RATE_LIMIT', remaining: 0 },
-        { status: 429 }
-      )
-    }
-
-    // ── Rate limit: session check (skipped for admin) ──
-    if (!isAdmin && sessionId) {
-      const { data: session } = await supabase
-        .from('dp_sessions')
-        .select('usage_count')
-        .eq('session_id', sessionId)
-        .single()
-
-      if (session && session.usage_count >= MAX_ANALYSES) {
-        return NextResponse.json(
-          { error: 'Analysis limit reached for this session', code: 'RATE_LIMIT', remaining: 0 },
-          { status: 429 }
-        )
-      }
-    }
-
-    // ── Rate limit: IP check — blocks browser switching (skipped for admin) ─
-    if (!isAdmin && ip !== 'unknown') {
-      const { data: ipSessions } = await supabase
-        .from('dp_sessions')
-        .select('usage_count')
-        .eq('ip_address', ip)
-
-      const totalIpUsage = (ipSessions || []).reduce((sum, s) => sum + (s.usage_count || 0), 0)
-      if (totalIpUsage >= MAX_ANALYSES) {
-        return NextResponse.json(
-          { error: 'Rate limit exceeded for this network', code: 'RATE_LIMIT', remaining: 0 },
-          { status: 429 }
-        )
-      }
-    }
+    // ── Usage limit: atomic, per device and per network address ──
+    const reservation = await reserveQuota(req, supabase, GUARD)
+    if (!reservation.ok) return reservation.response
 
     // Delete any existing demo analysis for this session
     if (sessionId) {
@@ -82,14 +40,20 @@ export async function POST(req: NextRequest) {
     }
 
     // Call Claude
-    const analysis = await analyzeDataset({
-      filename: DEMO_FILENAME,
-      rowCount: parsed.rowCount,
-      columns: parsed.columns,
-      columnTypes: parsed.columnTypes,
-      summaryStats: parsed.summaryStats,
-      dataSample: parsed.dataSampleForClaude,
-    })
+    let analysis
+    try {
+      analysis = await analyzeDataset({
+        filename: DEMO_FILENAME,
+        rowCount: parsed.rowCount,
+        columns: parsed.columns,
+        columnTypes: parsed.columnTypes,
+        summaryStats: parsed.summaryStats,
+        dataSample: parsed.dataSampleForClaude,
+      })
+    } catch (claudeError) {
+      await reservation.refund()
+      throw claudeError
+    }
 
     // Save to Supabase — tagged with session
     const { data, error } = await supabase
@@ -113,31 +77,7 @@ export async function POST(req: NextRequest) {
 
     if (error) throw new Error(error.message)
 
-    // ── Update session usage ──────────────────────
-    let remaining = MAX_ANALYSES - 1
-    if (sessionId) {
-      const { data: existing } = await supabase
-        .from('dp_sessions')
-        .select('usage_count')
-        .eq('session_id', sessionId)
-        .single()
-
-      if (existing) {
-        const newCount = existing.usage_count + 1
-        await supabase
-          .from('dp_sessions')
-          .update({ usage_count: newCount, ip_address: ip })
-          .eq('session_id', sessionId)
-        remaining = Math.max(0, MAX_ANALYSES - newCount)
-      } else {
-        await supabase
-          .from('dp_sessions')
-          .insert({ session_id: sessionId, ip_address: ip, usage_count: 1 })
-        remaining = MAX_ANALYSES - 1
-      }
-    }
-
-    return NextResponse.json({ id: data.id, remaining: isAdmin ? 999 : remaining })
+    return reservation.respond(NextResponse.json({ id: data.id, remaining: reservation.remaining }))
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Seed failed' },

@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { askQuestion } from '@/lib/claude'
 import { createServerSupabaseClient } from '@/lib/supabase'
+import { reserveQuota, GuardConfig } from '@/lib/usage-guard'
 
-const MAX_QA_PER_SESSION = 20
+const MAX_QUESTION_CHARS = 500
+// Q&A calls Claude too, so it has its own budget per device and address.
+const GUARD: GuardConfig = { prefix: 'dp', limit: 20, noun: 'questions', scope: 'qa' }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { analysisId, question, messageHistory = [], session_id = '' } = body
+    const { analysisId, question, messageHistory = [] } = body
 
     // ── Validate ──────────────────────────────────
     if (!analysisId) {
@@ -19,20 +22,8 @@ export async function POST(req: NextRequest) {
 
     const supabase = createServerSupabaseClient()
 
-    // ── Rate limit Q&A by session ─────────────────
-    if (session_id) {
-      const { count } = await supabase
-        .from('dp_qa_messages')
-        .select('*', { count: 'exact', head: true })
-        .eq('analysis_id', analysisId)
-        .eq('role', 'user')
-
-      if (count !== null && count >= MAX_QA_PER_SESSION) {
-        return NextResponse.json(
-          { error: 'Q&A limit reached for this analysis', code: 'RATE_LIMIT' },
-          { status: 429 }
-        )
-      }
+    if (question.length > MAX_QUESTION_CHARS) {
+      return NextResponse.json({ error: 'Question is too long' }, { status: 400 })
     }
 
     // ── Fetch analysis context ─────────────────────
@@ -56,8 +47,18 @@ export async function POST(req: NextRequest) {
 
     // ── Last 10 messages for context ───────────────
     const recentHistory = Array.isArray(messageHistory)
-      ? (messageHistory as Array<{ role: 'user' | 'assistant'; content: string }>).slice(-10)
+      ? (messageHistory as Array<{ role: 'user' | 'assistant'; content: string }>)
+          .filter(
+            (m) =>
+              m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string'
+          )
+          .slice(-10)
+          .map((m) => ({ role: m.role, content: m.content.slice(0, MAX_QUESTION_CHARS * 4) }))
       : []
+
+    // ── Usage limit: atomic, per device and per network address ──
+    const reservation = await reserveQuota(req, supabase, GUARD)
+    if (!reservation.ok) return reservation.response
 
     // ── Ask Claude ─────────────────────────────────
     let answer: string
@@ -71,9 +72,12 @@ export async function POST(req: NextRequest) {
         conversationHistory: recentHistory,
       })
     } catch (claudeError) {
-      return NextResponse.json(
-        { error: `Claude error: ${claudeError instanceof Error ? claudeError.message : 'Unknown'}` },
-        { status: 500 }
+      await reservation.refund()
+      return reservation.respond(
+        NextResponse.json(
+          { error: `Claude error: ${claudeError instanceof Error ? claudeError.message : 'Unknown'}` },
+          { status: 500 }
+        )
       )
     }
 
@@ -83,7 +87,7 @@ export async function POST(req: NextRequest) {
       { analysis_id: analysisId, role: 'assistant', content: answer },
     ])
 
-    return NextResponse.json({ answer }, { status: 200 })
+    return reservation.respond(NextResponse.json({ answer }, { status: 200 }))
   } catch (err) {
     return NextResponse.json(
       { error: `Unexpected error: ${err instanceof Error ? err.message : 'Unknown'}` },
